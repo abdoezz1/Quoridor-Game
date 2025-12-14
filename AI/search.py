@@ -1,110 +1,88 @@
-# AI/search.py 
+# AI/search.py - OPTIMIZED VERSION
 
 import math
 import heapq
-from AI.move_generator import generate_all_moves
+from collections import deque
 
 
-# Wall codes (should match your Config.py)
+# Move codes
 PAWN_MOVE_CODE = "pawn"
 WALL_MOVE_CODE = "wall"
 VERTICAL_CONNECTOR_CODE = 2
 HORIZONTAL_CONNECTOR_CODE = 3
 
+# Performance tuning
+MAX_WALL_CANDIDATES = 15  # Only evaluate top N wall moves
+
 
 def find_best_move(board, ai_player, search_depth, wall_bonus_weight=1.0):
     """
     Find best move using Alpha-Beta search.
-    Same logic as colleague's ai_move().
-    
-    Args:
-        board: Board object
-        ai_player: AIPlayer instance
-        search_depth: how deep to search
-        wall_bonus_weight: weight for wall count in evaluation
-    
-    Returns:
-        (move_type, move_data) tuple or None
     """
-    # Create virtual board state
     virtual_board = _create_virtual_board(board)
-    
-    # Generate valid moves for AI (maximizing player)
-    valid_moves = generate_all_moves(board, ai_player)
+    valid_moves = _get_valid_moves_virtual(board, virtual_board, maximizing=True)
     
     if not valid_moves:
         return None
     
-    # Check for immediate winning move (same as colleague's fast_win_move)
+    # Instant win check
     for move in valid_moves:
         if move[0] == PAWN_MOVE_CODE and move[1][0] == ai_player.objective:
-            return move  # Instant win!
+            return move
     
-    # Find best move via alpha-beta
+    # Move ordering: pawn moves first (faster to evaluate)
+    valid_moves.sort(key=lambda m: (0 if m[0] == PAWN_MOVE_CODE else 1))
+    
     best_move = None
     best_value = -math.inf
     
     for move in valid_moves:
-        # Apply move to virtual board
         new_virtual_board = _apply_move_virtual(board, virtual_board, move, maximizing=True)
         
-        # Evaluate with alpha-beta (opponent's turn next, so maximizing=False)
         value = _alpha_beta(
-            board, 
-            new_virtual_board, 
-            search_depth, 
-            -math.inf, 
-            math.inf, 
-            False,  # Opponent's turn
+            board,
+            new_virtual_board,
+            search_depth - 1,  # We already made one move
+            -math.inf,
+            math.inf,
+            False,
             wall_bonus_weight
         )
         
         if value > best_value:
             best_value = value
             best_move = move
+        
+        # Early exit if we found a winning move
+        if value == math.inf:
+            break
     
     return best_move
 
 
 def _alpha_beta(board, virtual_board, depth, alpha, beta, maximizing, wall_bonus_weight):
     """
-    Alpha-Beta pruning - same logic as colleague's alpha_beta().
-    
-    Args:
-        board: Board object (for dimension info)
-        virtual_board: [p1_state, p2_state, grid]
-        depth: remaining search depth
-        alpha: best for maximizer
-        beta: best for minimizer
-        maximizing: True if AI's turn
-        wall_bonus_weight: evaluation weight
-    
-    Returns:
-        evaluation score
+    Alpha-Beta pruning with optimizations.
     """
-    # Terminal check: Player 1 reached objective
+    # Terminal checks
     if virtual_board[0][0][0] == board.p1.objective:
         return -math.inf if maximizing else math.inf
     
-    # Terminal check: Player 2 (AI) reached objective
     if virtual_board[1][0][0] == board.p2.objective:
         return math.inf if maximizing else -math.inf
     
-    # Depth limit reached - evaluate
+    # Depth limit
     if depth == 0:
         return _heuristic(board, virtual_board, wall_bonus_weight)
     
-    # Generate valid moves
     valid_moves = _get_valid_moves_virtual(board, virtual_board, maximizing)
     
     if not valid_moves:
         return _heuristic(board, virtual_board, wall_bonus_weight)
     
-    # Move ordering: prioritize winning moves (same as colleague)
-    valid_moves.sort(key=lambda m: 0 if m[0] == PAWN_MOVE_CODE and (
-        (maximizing and m[1][0] == board.p2.objective) or
-        (not maximizing and m[1][0] == board.p1.objective)
-    ) else 1)
+    # Move ordering: winning moves first, then pawn moves, then walls
+    target_row = board.p2.objective if maximizing else board.p1.objective
+    valid_moves.sort(key=lambda m: _move_priority(m, target_row))
     
     if maximizing:
         max_eval = -math.inf
@@ -114,7 +92,7 @@ def _alpha_beta(board, virtual_board, depth, alpha, beta, maximizing, wall_bonus
             max_eval = max(max_eval, eval_score)
             alpha = max(alpha, eval_score)
             if beta <= alpha:
-                break  # Beta cutoff
+                break
         return max_eval
     else:
         min_eval = math.inf
@@ -124,47 +102,62 @@ def _alpha_beta(board, virtual_board, depth, alpha, beta, maximizing, wall_bonus
             min_eval = min(min_eval, eval_score)
             beta = min(beta, eval_score)
             if beta <= alpha:
-                break  # Alpha cutoff
+                break
         return min_eval
+
+
+def _move_priority(move, target_row):
+    """
+    Assign priority for move ordering. Lower = evaluated first.
+    """
+    move_type, move_data = move
+    
+    if move_type == PAWN_MOVE_CODE:
+        # Winning move = highest priority
+        if move_data[0] == target_row:
+            return -100
+        # Other pawn moves = high priority
+        return 0
+    else:
+        # Wall moves = lower priority
+        return 10
 
 
 def _heuristic(board, virtual_board, wall_bonus_weight):
     """
-    Evaluation function - EXACTLY matches colleague's heuristic().
+    Fast evaluation function.
     """
-    p1_path = _astar_path(board, virtual_board, virtual_board[0][0], board.p1.objective)
-    p2_path = _astar_path(board, virtual_board, virtual_board[1][0], board.p2.objective)
+    p1_path = _astar_path(virtual_board, virtual_board[0][0], board.p1.objective, board.dimBoard)
+    p2_path = _astar_path(virtual_board, virtual_board[1][0], board.p2.objective, board.dimBoard)
     
-    # Terminal states
     if p1_path == 0:
         return -math.inf
     if p2_path == 0:
         return math.inf
     
-    # Same formula as colleague
     path_diff = (p1_path - p2_path) * 4
-    wall_bonus = virtual_board[1][1] * wall_bonus_weight  # AI (p2) wall count
+    wall_bonus = virtual_board[1][1] * wall_bonus_weight
     
     return path_diff + wall_bonus
 
 
-def _astar_path(board, virtual_board, start_pos, target_row):
+def _astar_path(virtual_board, start_pos, target_row, dim):
     """
-    A* pathfinding - same as colleague's a_star_path().
+    A* pathfinding - optimized.
     """
-    dim = board.dimBoard
     grid = virtual_board[2]
     
-    visited = [[False] * dim for _ in range(dim)]
-    # (f_score, g_score, y, x)
-    heap = [(abs(start_pos[0] - target_row), 0, start_pos[0], start_pos[1])]
+    # Convert numpy types to int
+    start_y = int(start_pos[0])
+    start_x = int(start_pos[1])
     
-    directions = [
-        (-2, 0, -1, 0),  # Up
-        (2, 0, 1, 0),    # Down
-        (0, -2, 0, -1),  # Left
-        (0, 2, 0, 1)     # Right
-    ]
+    if start_y == target_row:
+        return 0
+    
+    visited = set()
+    heap = [(abs(start_y - target_row), 0, start_y, start_x)]
+    
+    directions = [(-2, 0, -1, 0), (2, 0, 1, 0), (0, -2, 0, -1), (0, 2, 0, 1)]
     
     while heap:
         f, g, y, x = heapq.heappop(heap)
@@ -172,98 +165,83 @@ def _astar_path(board, virtual_board, start_pos, target_row):
         if y == target_row:
             return g
         
-        if visited[y][x]:
+        if (y, x) in visited:
             continue
-        visited[y][x] = True
+        visited.add((y, x))
         
         for dy, dx, wy, wx in directions:
             ny, nx = y + dy, x + dx
             wall_y, wall_x = y + wy, x + wx
             
             if 0 <= ny < dim and 0 <= nx < dim:
-                if not grid[wall_y][wall_x] and not visited[ny][nx]:
+                if not grid[wall_y][wall_x] and (ny, nx) not in visited:
                     h = abs(ny - target_row)
                     heapq.heappush(heap, (g + 1 + h, g + 1, ny, nx))
     
-    return math.inf  # No path
+    return math.inf
 
 
 def _create_virtual_board(board):
     """
-    Create virtual board state - same structure as colleague's.
-    
-    Structure:
-    [
-        [p1_pos, p1_walls],   # Player 1 state
-        [p2_pos, p2_walls],   # Player 2 state  
-        grid                  # 2D list copy
-    ]
+    Create virtual board state.
     """
     dim = board.dimBoard
     grid_copy = [[board.board[y, x] for x in range(dim)] for y in range(dim)]
     
     return [
-        [list(board.p1.pos), board.p1.available_walls],
-        [list(board.p2.pos), board.p2.available_walls],
+        [[int(board.p1.pos[0]), int(board.p1.pos[1])], board.p1.available_walls],
+        [[int(board.p2.pos[0]), int(board.p2.pos[1])], board.p2.available_walls],
         grid_copy
     ]
 
 
 def _apply_move_virtual(board, virtual_board, move, maximizing):
     """
-    Apply move to virtual board - EXACTLY matches colleague's apply_move().
-    Returns new virtual board (doesn't modify original).
+    Apply move to virtual board.
     """
-    # Deep copy
     new_virtual_board = [
         [virtual_board[0][0].copy(), virtual_board[0][1]],
         [virtual_board[1][0].copy(), virtual_board[1][1]],
         [row.copy() for row in virtual_board[2]]
     ]
     
-    # Player index: maximizing = AI = p2 = index 1
     player_idx = 1 if maximizing else 0
     player_id = board.p2.id if maximizing else board.p1.id
     
     move_type, move_data = move
     
     if move_type == PAWN_MOVE_CODE:
-        # Clear old position
         old_pos = virtual_board[player_idx][0]
         new_virtual_board[2][old_pos[0]][old_pos[1]] = 0
         
-        # Set new position
-        new_pos = move_data
-        new_virtual_board[player_idx][0] = list(new_pos)
-        new_virtual_board[2][new_pos[0]][new_pos[1]] = player_id
+        new_y, new_x = int(move_data[0]), int(move_data[1])
+        new_virtual_board[player_idx][0] = [new_y, new_x]
+        new_virtual_board[2][new_y][new_x] = player_id
     
-    else:  # WALL_MOVE_CODE
+    else:
         coord1, coord2, coord3 = move_data
         
         new_virtual_board[2][coord1[0]][coord1[1]] = 1
         new_virtual_board[2][coord3[0]][coord3[1]] = 1
         
-        # Connector type based on orientation
-        if coord1[0] == coord2[0]:  # Same row = horizontal
+        if coord1[0] == coord2[0]:
             new_virtual_board[2][coord2[0]][coord2[1]] = HORIZONTAL_CONNECTOR_CODE
-        else:  # Same column = vertical
+        else:
             new_virtual_board[2][coord2[0]][coord2[1]] = VERTICAL_CONNECTOR_CODE
         
-        # Decrease wall count
-        new_virtual_board[player_idx][1] -= 1
+        new_virtual_board[player_idx][1] -= 1  # FIXED: was -= 2
     
     return new_virtual_board
 
 
 def _get_valid_moves_virtual(board, virtual_board, maximizing):
     """
-    Generate valid moves from virtual board - matches colleague's get_valid_moves().
+    Generate valid moves - OPTIMIZED with limited wall moves.
     """
     moves = []
     dim = board.dimBoard
     grid = virtual_board[2]
     
-    # Current player info
     player_idx = 1 if maximizing else 0
     opponent_idx = 0 if maximizing else 1
     
@@ -271,28 +249,24 @@ def _get_valid_moves_virtual(board, virtual_board, maximizing):
     oy, ox = virtual_board[opponent_idx][0]
     remaining_walls = virtual_board[player_idx][1]
     
-    # Directions
-    directions = {
-        'up':    (-2, 0, -1, 0),
-        'down':  (2, 0, 1, 0),
-        'left':  (0, -2, 0, -1),
-        'right': (0, 2, 0, 1),
-    }
+    # Convert to int to avoid numpy issues
+    py, px = int(py), int(px)
+    oy, ox = int(oy), int(ox)
     
-    # Generate pawn moves (same logic as colleague)
-    for dy, dx, wy, wx in directions.values():
+    directions = [(-2, 0, -1, 0), (2, 0, 1, 0), (0, -2, 0, -1), (0, 2, 0, 1)]
+    
+    # Generate pawn moves
+    for dy, dx, wy, wx in directions:
         ny, nx = py + dy, px + dx
         wall_y, wall_x = py + wy, px + wx
         
-        # Check wall position bounds and blocking
         if not (0 <= wall_y < dim and 0 <= wall_x < dim):
             continue
         if grid[wall_y][wall_x]:
             continue
         
-        # Opponent in the way - jump logic
         if (ny, nx) == (oy, ox):
-            # Try straight jump
+            # Jump logic
             jy, jx = ny + dy, nx + dx
             jwy, jwx = ny + wy, nx + wx
             
@@ -302,67 +276,82 @@ def _get_valid_moves_virtual(board, virtual_board, maximizing):
                 moves.append((PAWN_MOVE_CODE, (jy, jx)))
                 continue
             
-            # Side steps (diagonal jumps)
-            if dy != 0:  # Moving vertically, try horizontal sides
+            # Diagonal jumps
+            if dy != 0:
                 for sdx, swx in [(-2, -1), (2, 1)]:
                     sy, sx = ny, nx + sdx
                     swy, swx_pos = ny, nx + swx
-                    if (0 <= sx < dim and
+                    if (0 <= sx < dim and 0 <= swx_pos < dim and
                         not grid[swy][swx_pos] and not grid[sy][sx]):
                         moves.append((PAWN_MOVE_CODE, (sy, sx)))
-            else:  # Moving horizontally, try vertical sides
+            else:
                 for sdy, swy in [(-2, -1), (2, 1)]:
                     sy, sx = ny + sdy, nx
                     swy_pos, swx = ny + swy, nx
-                    if (0 <= sy < dim and
+                    if (0 <= sy < dim and 0 <= swy_pos < dim and
                         not grid[swy_pos][swx] and not grid[sy][sx]):
                         moves.append((PAWN_MOVE_CODE, (sy, sx)))
         else:
-            # Regular move
             if 0 <= ny < dim and 0 <= nx < dim and not grid[ny][nx]:
                 moves.append((PAWN_MOVE_CODE, (ny, nx)))
     
-    # Generate wall moves if available
+    # Generate LIMITED wall moves
     if remaining_walls > 0:
-        wall_moves = _get_wall_moves_virtual(board, virtual_board, dim)
+        wall_moves = _get_wall_moves_limited(virtual_board, dim, py, px, oy, ox, board)
         moves.extend(wall_moves)
     
     return moves
 
 
-def _get_wall_moves_virtual(board, virtual_board, dim):
+def _get_wall_moves_limited(virtual_board, dim, py, px, oy, ox, board):
     """
-    Generate wall placements - same as colleague's wall generation.
+    Generate LIMITED wall placements - only strategic ones near players.
     """
-    moves = []
     grid = virtual_board[2]
-    
-    # Goal rows for path checking
     p1_goal = board.p1.objective
     p2_goal = board.p2.objective
     
+    # Collect wall candidates with priority scores
+    candidates = []
+    
     for y in range(1, dim - 1, 2):
         for x in range(1, dim - 1, 2):
-            # Try horizontal: (y, x-1), (y, x), (y, x+1)
+            if grid[y][x]:
+                continue
+            
+            # Priority: closer to opponent = more strategic
+            dist_to_opp = abs(y - oy) + abs(x - ox)
+            dist_to_self = abs(y - py) + abs(x - px)
+            priority = dist_to_opp  # Lower = better
+            
+            # Horizontal wall
             if x - 1 >= 0 and x + 1 < dim:
                 cells = ((y, x - 1), (y, x), (y, x + 1))
                 if not any(grid[cy][cx] for cy, cx in cells):
-                    if _wall_valid_virtual(virtual_board, cells, dim, p1_goal, p2_goal):
-                        moves.append((WALL_MOVE_CODE, cells))
+                    candidates.append((priority, cells))
             
-            # Try vertical: (y-1, x), (y, x), (y+1, x)
+            # Vertical wall
             if y - 1 >= 0 and y + 1 < dim:
                 cells = ((y - 1, x), (y, x), (y + 1, x))
                 if not any(grid[cy][cx] for cy, cx in cells):
-                    if _wall_valid_virtual(virtual_board, cells, dim, p1_goal, p2_goal):
-                        moves.append((WALL_MOVE_CODE, cells))
+                    candidates.append((priority, cells))
+    
+    # Sort by priority and take top candidates only
+    candidates.sort(key=lambda c: c[0])
+    candidates = candidates[:MAX_WALL_CANDIDATES]
+    
+    # Validate only the top candidates
+    moves = []
+    for priority, cells in candidates:
+        if _wall_valid_fast(virtual_board, cells, dim, p1_goal, p2_goal):
+            moves.append((WALL_MOVE_CODE, cells))
     
     return moves
 
 
-def _wall_valid_virtual(virtual_board, cells, dim, p1_goal, p2_goal):
+def _wall_valid_fast(virtual_board, cells, dim, p1_goal, p2_goal):
     """
-    Check wall doesn't block either player - same as colleague's has_path.
+    Fast wall validation using BFS.
     """
     grid = virtual_board[2]
     
@@ -370,9 +359,9 @@ def _wall_valid_virtual(virtual_board, cells, dim, p1_goal, p2_goal):
     for cy, cx in cells:
         grid[cy][cx] = 1
     
-    # Check both players have paths
-    p1_ok = _has_path_virtual(grid, virtual_board[0][0], p1_goal, dim)
-    p2_ok = _has_path_virtual(grid, virtual_board[1][0], p2_goal, dim)
+    # Check paths
+    p1_ok = _has_path_fast(grid, virtual_board[0][0], p1_goal, dim)
+    p2_ok = p1_ok and _has_path_fast(grid, virtual_board[1][0], p2_goal, dim)  # Short-circuit
     
     # Remove wall
     for cy, cx in cells:
@@ -381,62 +370,67 @@ def _wall_valid_virtual(virtual_board, cells, dim, p1_goal, p2_goal):
     return p1_ok and p2_ok
 
 
-def _has_path_virtual(grid, start, goal_row, dim):
+def _has_path_fast(grid, start, goal_row, dim):
     """
-    BFS path check - same as colleague's has_path.
+    Fast BFS path check.
     """
-    from collections import deque
+    start_y, start_x = int(start[0]), int(start[1])
     
-    visited = [[False] * dim for _ in range(dim)]
-    queue = deque([tuple(start)])
-    visited[start[0]][start[1]] = True
+    if start_y == goal_row:
+        return True
+    
+    visited = set()
+    visited.add((start_y, start_x))
+    queue = deque([(start_y, start_x)])
     
     directions = [(-2, 0, -1, 0), (2, 0, 1, 0), (0, -2, 0, -1), (0, 2, 0, 1)]
     
     while queue:
         y, x = queue.popleft()
         
-        if y == goal_row:
-            return True
-        
         for dy, dx, wy, wx in directions:
             ny, nx = y + dy, x + dx
             wall_y, wall_x = y + wy, x + wx
             
-            if (0 <= ny < dim and 0 <= nx < dim and
-                not grid[wall_y][wall_x] and not visited[ny][nx]):
-                visited[ny][nx] = True
-                queue.append((ny, nx))
+            if not (0 <= ny < dim and 0 <= nx < dim):
+                continue
+            if grid[wall_y][wall_x]:
+                continue
+            if (ny, nx) in visited:
+                continue
+            
+            if ny == goal_row:
+                return True
+            
+            visited.add((ny, nx))
+            queue.append((ny, nx))
     
     return False
 
 
 def apply_move_to_board(board, move, player):
     """
-    Apply move to actual board (not virtual) - same as colleague's apply_move with is_virtual=False.
+    Apply move to actual board.
     """
     move_type, move_data = move
     grid = board.board
     
     if move_type == PAWN_MOVE_CODE:
-        # Clear old position
         grid[player.pos[0], player.pos[1]] = 0
         
-        # Set new position
-        new_y, new_x = move_data
+        new_y, new_x = int(move_data[0]), int(move_data[1])
         player.pos = [new_y, new_x]
         grid[new_y, new_x] = player.id
     
-    else:  # WALL_MOVE_CODE
+    else:
         coord1, coord2, coord3 = move_data
         
         grid[coord1[0], coord1[1]] = 1
         grid[coord3[0], coord3[1]] = 1
         
-        # Connector type
-        if coord1[0] == coord2[0]:  # Horizontal
+        if coord1[0] == coord2[0]:
             grid[coord2[0], coord2[1]] = HORIZONTAL_CONNECTOR_CODE
-        else:  # Vertical
+        else:
             grid[coord2[0], coord2[1]] = VERTICAL_CONNECTOR_CODE
         
-        player.available_walls -= 2  # Each wall costs 2
+        player.available_walls -= 1 
