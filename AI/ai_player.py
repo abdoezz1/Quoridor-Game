@@ -27,9 +27,9 @@ DIFFICULTY_SETTINGS = {
 
 class AIPlayer(Player):
 
-    def init(self, id, board, pos, objective, available_walls=10,
+    def __init__(self, id, board, pos, objective, available_walls=10,
                  difficulty='medium'):
-        super().init(id, board, pos, objective, available_walls)
+        super().__init__(id, board, pos, objective, available_walls)
         self.set_difficulty(difficulty)
 
     def set_difficulty(self, difficulty: str):

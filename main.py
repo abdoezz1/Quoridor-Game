@@ -6,8 +6,18 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from PySide6.QtCore import Qt, QTimer
 
+# Core game logic imports
 from core.Board import Board
+from core.player import Player
 from core.walls import place_wall, is_wall_placement_valid
+from core.rules import is_inside
+from core.movement import _apply_move
+
+# AI imports
+from AI.ai_player import AIPlayer
+from AI.move_generator import generate_pawn_moves
+
+# GUI imports
 from GUI.main_window import MainWindow
 from GUI.game_view import GameView
 from GUI.widgets.game_dialog import NewGameDialog
@@ -149,90 +159,51 @@ class QuoridorGame:
         self.board_widget.set_valid_moves(valid_moves)
 
     def _get_valid_moves(self, player) -> list:
-        """Get all valid moves for the player in display coordinates."""
+        """
+        Get all valid moves for the player in display coordinates.
+        Uses AI/move_generator.py for consistent move generation.
+        """
+        # Get pawn moves from AI module (returns moves in 17x17 coords)
+        pawn_moves = generate_pawn_moves(self.game, player)
+        
+        # Convert from 17×17 to 9×9 display coordinates
         valid = []
-        y, x = player.pos
-        board = self.game.board
-        dim = self.game.dimBoard
-
-        directions = [(-2, 0, "top"), (2, 0, "down"), (0, -2, "left"), (0, 2, "right")]
-
-        for dy, dx, name in directions:
-            ny, nx = y + dy, x + dx
-            wall_y, wall_x = y + dy // 2, x + dx // 2
-
-            if not (0 <= ny < dim and 0 <= nx < dim):
-                continue
-
-            if board[wall_y, wall_x] != 0:
-                continue
-
-            if board[ny, nx] == 0:
-                valid.append((ny // 2, nx // 2))
-            else:
-                # Opponent in the way - try jump
-                jump_y, jump_x = ny + dy, nx + dx
-                jump_wall_y, jump_wall_x = ny + dy // 2, nx + dx // 2
-
-                if 0 <= jump_y < dim and 0 <= jump_x < dim:
-                    if board[jump_wall_y, jump_wall_x] == 0 and board[jump_y, jump_x] == 0:
-                        valid.append((jump_y // 2, jump_x // 2))
-                    else:
-                        self._add_diagonal_moves(valid, player, dy, dx)
-                else:
-                    self._add_diagonal_moves(valid, player, dy, dx)
-
+        for move_type, position in pawn_moves:
+            if move_type == "pawn":
+                display_row = position[0] // 2
+                display_col = position[1] // 2
+                valid.append((display_row, display_col))
+        
         return valid
 
-    def _add_diagonal_moves(self, valid: list, player, block_dy: int, block_dx: int):
-        """Add diagonal moves when forward jump is blocked."""
-        y, x = player.pos
-        board = self.game.board
-        dim = self.game.dimBoard
-
-        if block_dy != 0:
-            for side_dx in [-2, 2]:
-                ny, nx = y + block_dy, x + side_dx
-                wall_y, wall_x = y + block_dy, x + side_dx // 2
-
-                if 0 <= ny < dim and 0 <= nx < dim:
-                    if board[wall_y, wall_x] == 0 and board[ny, nx] == 0:
-                        valid.append((ny // 2, nx // 2))
-        else:
-            for side_dy in [-2, 2]:
-                ny, nx = y + side_dy, x + block_dx
-                wall_y, wall_x = y + side_dy // 2, x + block_dx
-
-                if 0 <= ny < dim and 0 <= nx < dim:
-                    if board[wall_y, wall_x] == 0 and board[ny, nx] == 0:
-                        valid.append((ny // 2, nx // 2))
-
     def _move_pawn(self, row: int, col: int):
-        """Move current player's pawn to the specified cell."""
+        """
+        Move current player's pawn to the specified cell.
+        Uses player.move_to_position() from core/player.py which delegates to core/movement.py.
+        """
         player = self.game.current_turn
 
         # Save state for undo
         old_y, old_x = player.pos[0], player.pos[1]
+        
+        # Convert to 17×17 coordinates
+        new_y, new_x = row * 2, col * 2
+
+        # Use player's move_to_position method (delegates to core/movement.py)
+        success = player.move_to_position(new_y, new_x)
+        
+        if not success:
+            QMessageBox.warning(self.window, "Invalid Move", "Cannot move to this position!")
+            return
+
+        # Record move in history for undo
         self.move_history.append({
             'type': 'move',
             'player_id': player.id,
             'old_pos': (old_y, old_x),
-            'new_pos': (row * 2, col * 2)
+            'new_pos': (new_y, new_x)
         })
         self.redo_history.clear()
-
-        # Convert to 17×17 coordinates
-        new_y, new_x = row * 2, col * 2
-
-        # Clear old position
-        self.game.board[player.pos[0], player.pos[1]] = 0
-
-        # Update position
-        player.pos[0] = new_y
-        player.pos[1] = new_x
-
-        # Mark new position
-        self.game.board[new_y, new_x] = player.id
 
         # Check for win
         if self._check_win(player):
@@ -326,11 +297,17 @@ class QuoridorGame:
         self.board_widget.walls = walls
 
     def _check_win(self, player) -> bool:
-        """Check if player has reached their objective row."""
+        """
+        Check if player has reached their objective row.
+        Uses player.objective from core/player.py.
+        """
         return player.pos[0] == player.objective
 
     def _on_wall_placement(self, row: int, col: int, orientation: str):
-        """Handle wall placement attempt."""
+        """
+        Handle wall placement attempt.
+        Uses is_wall_placement_valid and place_wall from core/walls.py.
+        """
         # Ignore during AI turn
         if self.vs_ai and self.game.current_turn == self.game.p2:
             return
@@ -338,6 +315,7 @@ class QuoridorGame:
         player = self.game.current_turn
 
         if player.available_walls <= 0:
+            QMessageBox.warning(self.window, "Invalid Move", "No walls remaining!")
             return
 
         if orientation == 'h':
@@ -347,27 +325,30 @@ class QuoridorGame:
             wall_y = row * 2
             wall_x = col * 2 + 1
 
-        if is_wall_placement_valid(self.game, wall_y, wall_x):
-            if place_wall(self.game, wall_y, wall_x, player):
-                self.move_history.append({
-                    'type': 'wall',
-                    'player_id': player.id,
-                    'wall_y': wall_y,
-                    'wall_x': wall_x,
-                    'orientation': orientation,
-                    'display_pos': (row, col, orientation)
-                })
-                self.redo_history.clear()
+        # Use core/walls.py for placement (place_wall validates internally)
+        if place_wall(self.game, wall_y, wall_x, player):
+            self.move_history.append({
+                'type': 'wall',
+                'player_id': player.id,
+                'wall_y': wall_y,
+                'wall_x': wall_x,
+                'orientation': orientation,
+                'display_pos': (row, col, orientation)
+            })
+            self.redo_history.clear()
 
-                player.available_walls -= 1
-                self.board_widget.walls.append((row, col, orientation))
+            # Note: place_wall already decrements available_walls
+            self.board_widget.walls.append((row, col, orientation))
 
-                self.game.switch_turn()
-                self._update_display()
+            self.game.switch_turn()
+            self._update_display()
 
-                # Trigger AI move if vs AI mode
-                if self.vs_ai and self.game.current_turn == self.game.p2:
-                    self.ai_timer.start(500)
+            # Trigger AI move if vs AI mode
+            if self.vs_ai and self.game.current_turn == self.game.p2:
+                self.ai_timer.start(500)
+        else:
+            # Wall placement failed - show error message
+            QMessageBox.warning(self.window, "Invalid Move", "Cannot place wall here!")
 
     def _restart_game(self):
         """Reset the game to initial state with same settings."""
@@ -385,12 +366,9 @@ class QuoridorGame:
 
         if last_move['type'] == 'move':
             old_y, old_x = last_move['old_pos']
-            new_y, new_x = last_move['new_pos']
-
-            self.game.board[new_y, new_x] = 0
-            player.pos[0] = old_y
-            player.pos[1] = old_x
-            self.game.board[old_y, old_x] = player.id
+            
+            # Use _apply_move from core/movement.py to restore position
+            _apply_move(player, old_y, old_x)
 
         elif last_move['type'] == 'wall':
             wall_y = last_move['wall_y']
@@ -398,7 +376,7 @@ class QuoridorGame:
             orientation = last_move['orientation']
 
             self._remove_wall_from_board(wall_y, wall_x, orientation)
-            player.available_walls += 1
+            player.available_walls += 2  # Restore 2 walls on undo
 
             display_pos = last_move['display_pos']
             if display_pos in self.board_widget.walls:
@@ -409,15 +387,20 @@ class QuoridorGame:
         self._update_display()
 
     def _remove_wall_from_board(self, wall_y: int, wall_x: int, orientation: str):
-        """Remove a wall from the backend board grid."""
+        """
+        Remove a wall from the backend board grid.
+        Clears all 3 cells (2 segments + connector) as defined in core/walls.py.
+        """
         if orientation == 'h':
+            # Horizontal wall: same row, spans 3 columns
             self.game.board[wall_y, wall_x] = 0
+            self.game.board[wall_y, wall_x + 1] = 0  # connector
             self.game.board[wall_y, wall_x + 2] = 0
-            self.game.board[wall_y, wall_x + 1] = 0
         else:
+            # Vertical wall: same column, spans 3 rows
             self.game.board[wall_y, wall_x] = 0
+            self.game.board[wall_y + 1, wall_x] = 0  # connector
             self.game.board[wall_y + 2, wall_x] = 0
-            self.game.board[wall_y + 1, wall_x] = 0
 
     def _redo_move(self):
         """Redo a previously undone move."""
@@ -428,13 +411,10 @@ class QuoridorGame:
         player = self.game.p1 if redo_move['player_id'] == 1 else self.game.p2
 
         if redo_move['type'] == 'move':
-            old_y, old_x = redo_move['old_pos']
             new_y, new_x = redo_move['new_pos']
-
-            self.game.board[old_y, old_x] = 0
-            player.pos[0] = new_y
-            player.pos[1] = new_x
-            self.game.board[new_y, new_x] = player.id
+            
+            # Use _apply_move from core/movement.py to apply position
+            _apply_move(player, new_y, new_x)
 
         elif redo_move['type'] == 'wall':
             wall_y = redo_move['wall_y']
@@ -443,7 +423,7 @@ class QuoridorGame:
             display_pos = redo_move['display_pos']
 
             self._apply_wall_to_board(wall_y, wall_x, orientation)
-            player.available_walls -= 1
+            player.available_walls -= 2  # Each wall costs 2
             self.board_widget.walls.append(display_pos)
 
         self.move_history.append(redo_move)
@@ -452,15 +432,22 @@ class QuoridorGame:
         self._update_display()
 
     def _apply_wall_to_board(self, wall_y: int, wall_x: int, orientation: str):
-        """Apply a wall to the backend board grid."""
+        """
+        Apply a wall to the backend board grid.
+        Uses same wall codes as defined in core/rules.py.
+        """
+        from core.rules import HORIZONTAL_CONNECTOR_CODE, VERTICAL_CONNECTOR_CODE
+        
         if orientation == 'h':
+            # Horizontal wall: same row, spans 3 columns
             self.game.board[wall_y, wall_x] = 1
+            self.game.board[wall_y, wall_x + 1] = HORIZONTAL_CONNECTOR_CODE  # connector
             self.game.board[wall_y, wall_x + 2] = 1
-            self.game.board[wall_y, wall_x + 1] = 1
         else:
+            # Vertical wall: same column, spans 3 rows
             self.game.board[wall_y, wall_x] = 1
+            self.game.board[wall_y + 1, wall_x] = VERTICAL_CONNECTOR_CODE  # connector
             self.game.board[wall_y + 2, wall_x] = 1
-            self.game.board[wall_y + 1, wall_x] = 1
 
     # ==================== SAVE/LOAD FUNCTIONALITY ====================
 
@@ -477,6 +464,22 @@ class QuoridorGame:
             return
 
         try:
+            # Helper function to convert numpy types to Python native types
+            def convert_to_native(obj):
+                """Recursively convert numpy types to Python native types for JSON serialization."""
+                import numpy as np
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {k: convert_to_native(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [convert_to_native(item) for item in obj]
+                return obj
+
             game_state = {
                 'version': '1.0',
                 'timestamp': datetime.now().isoformat(),
@@ -486,23 +489,23 @@ class QuoridorGame:
                 },
                 'board': {
                     'grid': self.game.board.tolist(),
-                    'dim': self.game.dimBoard,
+                    'dim': int(self.game.dimBoard),
                 },
                 'players': {
                     'p1': {
-                        'pos': self.game.p1.pos.tolist(),
-                        'walls': self.game.p1.available_walls,
-                        'objective': self.game.p1.objective,
+                        'pos': [int(x) for x in self.game.p1.pos],
+                        'walls': int(self.game.p1.available_walls),
+                        'objective': int(self.game.p1.objective),
                     },
                     'p2': {
-                        'pos': self.game.p2.pos.tolist(),
-                        'walls': self.game.p2.available_walls,
-                        'objective': self.game.p2.objective,
+                        'pos': [int(x) for x in self.game.p2.pos],
+                        'walls': int(self.game.p2.available_walls),
+                        'objective': int(self.game.p2.objective),
                     },
                 },
                 'current_turn': 1 if self.game.current_turn == self.game.p1 else 2,
                 'gui_walls': self.board_widget.walls,
-                'move_history': self.move_history,
+                'move_history': convert_to_native(self.move_history),
             }
 
             with open(filepath, 'w') as f:

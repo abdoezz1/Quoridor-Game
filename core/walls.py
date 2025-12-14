@@ -105,8 +105,8 @@ def place_wall(board, y, x, player):
     else:
         grid[connector[0], connector[1]] = VERTICAL_CONNECTOR_CODE
 
-    # Deduct walls
-    player.available_walls -= 1
+    # Deduct walls (each wall costs 2)
+    player.available_walls -= 2
 
     return True
 

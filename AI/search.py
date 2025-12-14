@@ -439,4 +439,4 @@ def apply_move_to_board(board, move, player):
         else:  # Vertical
             grid[coord2[0], coord2[1]] = VERTICAL_CONNECTOR_CODE
         
-        player.available_walls -= 1
+        player.available_walls -= 2  # Each wall costs 2
