@@ -2,7 +2,7 @@ import numpy as np
 from core.rules import DEFAULT_PAWN_DIM, DEFAULT_FULL_DIM
 from core.rules import PAWN_MOVE_CODE, WALL_MOVE_CODE
 from core.player import Player
-from ai.ai_player import AIPlayer
+from AI.ai_player import AIPlayer
 
 
 class Board:
@@ -14,7 +14,7 @@ class Board:
     - Manages whether game is vs AI or vs human
     """
 
-    def __init__(self, dim=DEFAULT_PAWN_DIM, vs_ai=False):
+    def __init__(self, dim=DEFAULT_PAWN_DIM, vs_ai=False, ai_difficulty='medium'):
         # Dimensions
         self.dimPawnBoard = dim                                 # 9 rows of pawn cells
         self.dimWallBoard = self.dimPawnBoard - 1               # 8 wall rows
@@ -25,6 +25,7 @@ class Board:
 
         # Game mode
         self.vs_ai = vs_ai
+        self.ai_difficulty = ai_difficulty
 
         # -------------------------------
         # Initialize Players
@@ -46,6 +47,7 @@ class Board:
                 board=self,
                 pos=p2_start,
                 objective=self.dimBoard - 1,  # must reach last row
+                difficulty=ai_difficulty,
             )
         else:
             self.p2 = Player(
