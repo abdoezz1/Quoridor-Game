@@ -31,6 +31,7 @@ class AIPlayer(Player):
                  difficulty='medium'):
         super().__init__(id, board, pos, objective, available_walls)
         self.set_difficulty(difficulty)
+        self.position_history = []  # Track recent positions
 
     def set_difficulty(self, difficulty: str):
         difficulty = difficulty.lower()
@@ -44,11 +45,11 @@ class AIPlayer(Player):
         self.random_chance = settings['random_chance']
 
     def ai_move(self):
-
         if self.random_chance > 0 and random.random() < self.random_chance:
             valid_moves = generate_all_moves(self.board, self)
             if valid_moves:
                 best_move = random.choice(valid_moves)
+                self._update_history(best_move)  # Track position
                 apply_move_to_board(self.board, best_move, self)
                 self.board.switch_turn()
                 return True
@@ -57,15 +58,29 @@ class AIPlayer(Player):
             self.board,
             self,
             self.search_depth,
-            self.wall_bonus_weight
+            self.wall_bonus_weight,
+            self.position_history  # Pass history to search
         )
 
         if best_move is None:
             print("AI couldn't find a valid move!")
             return False
 
+        self._update_history(best_move)  # Track position
         apply_move_to_board(self.board, best_move, self)
-
         self.board.switch_turn()
-
         return True
+
+    def _update_history(self, move):
+        """Track recent positions to prevent oscillation."""
+        if move[0] == "pawn":
+            pos = (int(move[1][0]), int(move[1][1]))
+            self.position_history.append(pos)
+            
+            # Keep only last 6 positions
+            if len(self.position_history) > 6:
+                self.position_history.pop(0)
+
+    def reset_history(self):
+        """Call when starting a new game."""
+        self.position_history = []
