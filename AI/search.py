@@ -42,14 +42,14 @@ def find_best_move(board, ai_player, search_depth, wall_bonus_weight=1.0):
         value = _alpha_beta(
             board,
             new_virtual_board,
-            search_depth - 1,  # We already made one move
+            search_depth - 1,
             -math.inf,
             math.inf,
             False,
             wall_bonus_weight
         )
         
-        if value > best_value:
+        if value > best_value or best_move is None:
             best_value = value
             best_move = move
         
