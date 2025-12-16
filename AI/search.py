@@ -14,13 +14,9 @@ HORIZONTAL_CONNECTOR_CODE = 3
 # Performance tuning
 MAX_WALL_CANDIDATES = 30  # Evaluate top N strategic walls
 
-# Debug flag - set to True to see AI thinking
-DEBUG = False
 
 
-def _debug(*args):
-    if DEBUG:
-        print(*args)
+
 
 
 # =============================================================================
@@ -509,15 +505,7 @@ def find_best_move(board, ai_player, search_depth, wall_bonus_weight=1.0, positi
     # Detect oscillation
     is_stuck = _detect_oscillation(position_history)
     
-    # Debug output
-    if DEBUG:
-        _debug("\n" + "="*60)
-        _debug(f"AI TURN - Position: {virtual_board[1][0]}, Objective: {ai_player.objective}")
-        _debug(f"Opponent Position: {virtual_board[0][0]}")
-        _debug(f"Position History: {position_history}")
-        _debug(f"Oscillation Detected: {is_stuck}")
-        _debug(f"Valid moves: {len(valid_moves)} ({len([m for m in valid_moves if m[0] == PAWN_MOVE_CODE])} pawn, {len([m for m in valid_moves if m[0] == WALL_MOVE_CODE])} wall)")
-        _debug("-"*60)
+
     
     best_move = None
     best_value = -math.inf
@@ -547,8 +535,7 @@ def find_best_move(board, ai_player, search_depth, wall_bonus_weight=1.0, positi
         if move[0] == WALL_MOVE_CODE and is_stuck:
             value += 2.0
         
-        if DEBUG and move[0] == PAWN_MOVE_CODE:
-            _debug(f"  {move[1]}: {value:.2f}")
+
         
         if value > best_value or best_move is None:
             best_value = value
@@ -557,8 +544,6 @@ def find_best_move(board, ai_player, search_depth, wall_bonus_weight=1.0, positi
         if value == math.inf:
             break
     
-    if DEBUG:
-        _debug(f"DECISION: {best_move[0]} -> {best_move[1]}")
-        _debug("="*60 + "\n")
+
     
     return best_move
