@@ -230,11 +230,15 @@ class QuoridorGame:
         ai_player = self.game.p2
         old_pos = (ai_player.pos[0], ai_player.pos[1])
         old_walls = ai_player.available_walls
+        old_gui_walls = list(self.board_widget.walls)
 
         # Execute AI move
         success = ai_player.ai_move()
 
         if success:
+            # Rebuild GUI walls from board state first
+            self._rebuild_gui_walls()
+
             # Determine what kind of move was made
             new_pos = (ai_player.pos[0], ai_player.pos[1])
 
@@ -247,18 +251,35 @@ class QuoridorGame:
                     'new_pos': new_pos
                 })
             elif ai_player.available_walls < old_walls:
-                # Wall placement - find the new wall
-                # (For simplicity, we'll mark this as a special AI wall move)
+                # Wall placement - find the newly added GUI wall by diffing lists
+                added = set(self.board_widget.walls) - set(old_gui_walls)
+                display_pos = None
+                if added:
+                    display_pos = next(iter(added))
+
+                # Fallback: if we couldn't determine display_pos, leave coords None
+                if display_pos is not None:
+                    row, col, orientation = display_pos
+                    if orientation == 'h':
+                        wall_y = row * 2 + 1
+                        wall_x = col * 2
+                    else:
+                        wall_y = row * 2
+                        wall_x = col * 2 + 1
+                else:
+                    wall_y = wall_x = orientation = None
+
                 self.move_history.append({
                     'type': 'ai_wall',
                     'player_id': 2,
+                    'wall_y': wall_y,
+                    'wall_x': wall_x,
+                    'orientation': orientation,
+                    'display_pos': display_pos,
                     'walls_before': old_walls
                 })
 
             self.redo_history.clear()
-
-            # Rebuild GUI walls from board state
-            self._rebuild_gui_walls()
 
             # Check for AI win
             if self._check_win(ai_player):
@@ -376,10 +397,27 @@ class QuoridorGame:
             orientation = last_move['orientation']
 
             self._remove_wall_from_board(wall_y, wall_x, orientation)
-            player.available_walls += 2  # Restore 2 walls on undo
+            player.available_walls += 1  # Restore 1 wall on undo
 
             display_pos = last_move['display_pos']
             if display_pos in self.board_widget.walls:
+                self.board_widget.walls.remove(display_pos)
+
+        elif last_move['type'] == 'ai_wall':
+            wall_y = last_move.get('wall_y')
+            wall_x = last_move.get('wall_x')
+            orientation = last_move.get('orientation')
+
+            # If we have coordinates, remove from backend board
+            if wall_y is not None and wall_x is not None and orientation is not None:
+                self._remove_wall_from_board(wall_y, wall_x, orientation)
+
+            # Restore AI's wall count
+            player.available_walls += 1
+
+            # Remove from GUI walls if present
+            display_pos = last_move.get('display_pos')
+            if display_pos and display_pos in self.board_widget.walls:
                 self.board_widget.walls.remove(display_pos)
 
         self.game.switch_turn()
@@ -423,8 +461,20 @@ class QuoridorGame:
             display_pos = redo_move['display_pos']
 
             self._apply_wall_to_board(wall_y, wall_x, orientation)
-            player.available_walls -= 2  # Each wall costs 2
+            player.available_walls -= 1  # Each wall costs 1
             self.board_widget.walls.append(display_pos)
+
+        elif redo_move['type'] == 'ai_wall':
+            wall_y = redo_move.get('wall_y')
+            wall_x = redo_move.get('wall_x')
+            orientation = redo_move.get('orientation')
+            display_pos = redo_move.get('display_pos')
+
+            if wall_y is not None and wall_x is not None and orientation is not None:
+                self._apply_wall_to_board(wall_y, wall_x, orientation)
+                player.available_walls -= 1
+            if display_pos:
+                self.board_widget.walls.append(display_pos)
 
         self.move_history.append(redo_move)
         self.game.switch_turn()
