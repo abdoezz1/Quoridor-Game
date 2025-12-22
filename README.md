@@ -84,6 +84,24 @@ git clone https://github.com/abdoezz1/Quoridor-Game.git && cd Quoridor-Game && p
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Y` |
 
+## 🖼️ Screenshots
+
+Here are some screenshots of the game in action:
+
+<p align="center">
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121534.png" alt="Game Screenshot 1" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121557.png" alt="Game Screenshot 2" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121629.png" alt="Game Screenshot 3" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121647.png" alt="Game Screenshot 4" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121710.png" alt="Game Screenshot 5" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121801.png" alt="Game Screenshot 6" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121844.png" alt="Game Screenshot 7" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121902.png" alt="Game Screenshot 8" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121917.png" alt="Game Screenshot 9" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20121957.png" alt="Game Screenshot 10" width="350"/>
+   <img src="Screenshots_of_the%20game/Screenshot%202025-12-21%20122012.png" alt="Game Screenshot 11" width="350"/>
+</p>
+
 ## 📁 Project Structure
 
 ```
