@@ -84,6 +84,12 @@ git clone https://github.com/abdoezz1/Quoridor-Game.git && cd Quoridor-Game && p
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Y` |
 
+## 🎥 Gameplay Video
+
+Watch a gameplay video demonstration:
+
+[![Watch the video](https://img.shields.io/badge/Watch%20Video-Click%20Here-blue?logo=google-drive)](https://drive.google.com/file/d/12BrC-sIpn5lK9ZQwaqR-b0o7CCMGEdr7/view?usp=drive_link)
+
 ## 🖼️ Screenshots
 
 Here are some screenshots of the game in action:
